@@ -9,7 +9,7 @@ import {
   getFirestore, collection, doc, getDocs, deleteDoc, query, where
 } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js';
 import { firebaseConfig } from './firebase-config.js';
-import { ADMINS, PRESIONES_PRE, PRESIONES_OSMOSIS, UMBRALES, estadoDe } from './comun.js';
+import { ADMINS, PRESIONES_PRE, PRESIONES_OSMOSIS, UMBRALES, FILTROS, estadoDe } from './comun.js';
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -172,6 +172,7 @@ function render() {
   $('contenido').hidden = false;
   renderTiles(regs);
   renderGraficos(regs);
+  renderCambios(regs);
   renderTabla(regs, sede);
 }
 
@@ -273,7 +274,7 @@ function renderGraficos(regs) {
     let unidad = d.unidad, nota = d.nota || '';
     if (d.unidadDe) {
       const usadas = [...new Set(regs.filter(r => r.v?.[d.unidadDe] != null).map(r => r.unidades?.[d.unidadDe] || 'µS/cm'))];
-      unidad = usadas.length === 1 ? usadas[0] : usadas.join(' / ');
+      unidad = usadas.length ? usadas.join(' / ') : 'µS/cm';
       if (usadas.length > 1) nota = 'Atención: en este período hay mediciones en µS/cm y en ppm. Revisá la unidad de cada punto en la tabla.';
     }
 
@@ -352,6 +353,55 @@ function renderGraficos(regs) {
   });
 }
 
+// ---------------------------------------------------------------------
+// Cambios de filtros
+// ---------------------------------------------------------------------
+const DIA = 86400000;
+const msDeFecha = f => { const t = new Date(`${f}T00:00`).getTime(); return isNaN(t) ? null : t; };
+
+function renderCambios(regs) {
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  $('cambiosFiltros').innerHTML = FILTROS.map(([clave, , nombre]) => {
+    // Último cambio: de todo el historial; el resto, del período elegido
+    const todos = registrosSede.filter(r => r.reemplazos?.[clave]);
+    const enPeriodo = regs.filter(r => r.reemplazos?.[clave]);
+    const ultimo = todos[todos.length - 1];
+    if (!ultimo) {
+      return `<div class="tile"><div class="tile__label">${esc(nombre)}</div><div class="tile__valor">—</div><div class="tile__extra">Sin cambios registrados</div></div>`;
+    }
+    const rep = ultimo.reemplazos[clave];
+    const msUlt = msDeFecha(rep.fecha) ?? ultimo.ms;
+    const dias = Math.max(0, Math.round((hoy - msUlt) / DIA));
+    const fechas = enPeriodo.map(r => msDeFecha(r.reemplazos[clave].fecha) ?? r.ms);
+    const intervalos = fechas.slice(1).map((f, i) => (f - fechas[i]) / DIA);
+    const promedio = intervalos.length ? Math.round(intervalos.reduce((a, b) => a + b, 0) / intervalos.length) : null;
+    const tipos = {};
+    enPeriodo.forEach(r => { const t = r.reemplazos[clave].tipo; tipos[t] = (tipos[t] || 0) + 1; });
+    const tiposTxt = Object.entries(tipos).sort((a, b) => b[1] - a[1]).map(([t, n]) => `${esc(t)} ×${n}`).join(' · ') || '—';
+    return `<div class="tile">
+      <div class="tile__label">${esc(nombre)}</div>
+      <div class="tile__valor">${fmtFecha(msUlt)}<span class="tile__tipo">${esc(rep.tipo)}</span></div>
+      <div class="tile__extra">último cambio · hace ${dias} día${dias === 1 ? '' : 's'}</div>
+      <div class="tile__filas">
+        <span>Cambios en el período: <b>${enPeriodo.length}</b></span>
+        <span>Cada cuánto, en promedio: <b>${promedio == null ? '—' : promedio + ' días'}</b></span>
+        <span>Cartuchos usados: <b>${tiposTxt}</b></span>
+      </div>
+    </div>`;
+  }).join('');
+
+  const filas = [];
+  regs.forEach(r => FILTROS.forEach(([clave, , nombre]) => {
+    const rep = r.reemplazos?.[clave];
+    if (rep) filas.push({ ms: msDeFecha(rep.fecha) ?? r.ms, nombre, tipo: rep.tipo });
+  }));
+  filas.sort((a, b) => b.ms - a.ms);
+  $('tablaCambios').innerHTML = filas.length
+    ? `<thead><tr><th>Fecha de reemplazo</th><th style="text-align:left">Filtro</th><th style="text-align:left">Tipo de cartucho</th></tr></thead><tbody>` +
+      filas.map(f => `<tr><td>${fmtFecha(f.ms)}</td><td style="text-align:left">${esc(f.nombre)}</td><td style="text-align:left">${esc(f.tipo)}</td></tr>`).join('') + '</tbody>'
+    : '<tbody><tr><td style="text-align:left;color:var(--ink-faint)">No hay cambios de filtros en este período.</td></tr></tbody>';
+}
+
 // Columnas de la tabla y del CSV
 function columnas() {
   return [
@@ -405,11 +455,13 @@ $('btnCSV').addEventListener('click', () => {
     return /[;"\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
   };
   const lineas = [
-    ['Fecha', 'Hora', 'Empresa', 'Sede', ...cols.map(c => c[1]), 'Unidad cond. entrada', 'Unidad cond. salida', 'Cloro (texto)', 'Dureza (texto)', 'Comentarios'].map(celda).join(';'),
+    ['Fecha', 'Hora', 'Empresa', 'Sede', ...cols.map(c => c[1]), 'Unidad cond. entrada', 'Unidad cond. salida', 'Cloro (texto)', 'Dureza (texto)',
+      ...FILTROS.map(([, , n]) => `Cambio ${n.replace('Filtro ', '')} (cartucho)`), 'Comentarios'].map(celda).join(';'),
     ...regs.map(r => [
       r.fecha, r.hora, r.empresa, r.sede,
       ...cols.map(([c]) => r.v?.[c] ?? null),
-      r.unidades?.condIN, r.unidades?.condOUT, r.textos?.cloro, r.textos?.dureza, r.textos?.comentarios
+      r.unidades?.condIN, r.unidades?.condOUT, r.textos?.cloro, r.textos?.dureza,
+      ...FILTROS.map(([clave]) => r.reemplazos?.[clave]?.tipo || ''), r.textos?.comentarios
     ].map(celda).join(';'))
   ];
   const blob = new Blob(['﻿' + lineas.join('\r\n')], { type: 'text/csv;charset=utf-8' });

@@ -843,6 +843,7 @@ body.modo-firma #btnSolicitarFirma{display:none !important;}
   </section>
 
   <!-- REEMPLAZOS -->
+  <datalist id="tiposCartucho"><option value="ES"><option value="BIG BLUE"><option value="XL"><option value="OK"></datalist>
   <section class="panel">
     <header class="panel__band">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 3.5a3.5 3.5 0 0 0-4.9 4.4L4 13.5V19h5.5l5.6-5.6a3.5 3.5 0 0 0 4.4-4.9l-2.7 2.7-2-2z"/></svg>
@@ -852,15 +853,15 @@ body.modo-firma #btnSolicitarFirma{display:none !important;}
       <div class="tiles">
         <div class="tile">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="18" rx="2"/><path d="M8 9h8M8 14h8"/></svg>
-          <div class="field"><label for="REEMFS">Filtro de sedimentos</label><input type="text" id="REEMFS" placeholder="Fecha / OK" required></div>
+          <div class="field"><label for="REEMFS">Filtro de sedimentos</label><input type="text" id="REEMFS" placeholder="ES / BIG BLUE / XL · u OK" list="tiposCartucho" autocomplete="off" required></div>
         </div>
         <div class="tile">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="18" rx="2"/><path d="M8 9h8M8 14h8"/></svg>
-          <div class="field"><label for="REEMBACT">Filtro bacteriológico</label><input type="text" id="REEMBACT" placeholder="Fecha / OK" required></div>
+          <div class="field"><label for="REEMBACT">Filtro bacteriológico</label><input type="text" id="REEMBACT" placeholder="ES / BIG BLUE / XL · u OK" list="tiposCartucho" autocomplete="off" required></div>
         </div>
         <div class="tile">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="18" rx="2"/><path d="M8 9h8M8 14h8"/></svg>
-          <div class="field"><label for="REEMPO">Filtro pre ósmosis</label><input type="text" id="REEMPO" placeholder="Fecha / OK" required></div>
+          <div class="field"><label for="REEMPO">Filtro pre ósmosis</label><input type="text" id="REEMPO" placeholder="ES / BIG BLUE / XL · u OK" list="tiposCartucho" autocomplete="off" required></div>
         </div>
         <div class="tile">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="18" rx="2"/><path d="M8 9h8M8 14h8"/></svg>

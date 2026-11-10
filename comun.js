@@ -61,6 +61,27 @@ export function estadoDe(medida, valor) {
 }
 
 // ---------------------------------------------------------------------
+// Cambios de filtros
+// ---------------------------------------------------------------------
+export const FILTROS = [
+  ['sedimentos', 'REEMFS', 'Filtro de sedimentos'],
+  ['bacteriologico', 'REEMBACT', 'Filtro bacteriológico'],
+  ['preOsmosis', 'REEMPO', 'Filtro pre ósmosis']
+];
+
+// Textos que significan "no se cambió" (comparados sin espacios ni signos)
+const SIN_CAMBIO = new Set(['', 'OK', 'NO', 'NA', 'SC', 'SINCAMBIO', 'NOSECAMBIA', 'NOSECAMBIO', 'NOAPLICA', '0', 'X']);
+const ALIAS_CARTUCHO = { ES: 'ES', BIGBLUE: 'BIG BLUE', BB: 'BIG BLUE', XL: 'XL' };
+
+// Texto del campo -> tipo de cartucho, o null si no hubo cambio
+export function tipoDeCartucho(texto) {
+  const crudo = String(texto || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  const compacto = normalizar(crudo).replace(/-/g, '');
+  if (SIN_CAMBIO.has(compacto)) return null;
+  return ALIAS_CARTUCHO[compacto] || crudo;
+}
+
+// ---------------------------------------------------------------------
 // Formulario (campos crudos) -> registro para el historial
 // ---------------------------------------------------------------------
 function numero(v) {
@@ -111,10 +132,18 @@ export function registroDelFormulario(campos) {
   v.cloro = quimico(campos.CLORO);
   v.dureza = quimico(campos.DUREZA);
 
+  // Cambios de filtros: fecha de reemplazo = fecha del servicio
+  const reemplazos = {};
+  FILTROS.forEach(([clave, id]) => {
+    const tipo = tipoDeCartucho(campos[id]);
+    if (tipo) reemplazos[clave] = { fecha: campos.fecha || '', tipo, texto: campos[id] };
+  });
+
   return {
     fecha: campos.fecha || '',
     hora: campos.hora || '',
     v,
+    reemplazos,
     unidades: {
       condIN: campos.unidadcondIN || 'µS/cm',
       condOUT: campos.unidadcondOUT || 'µS/cm'
