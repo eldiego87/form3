@@ -1,0 +1,47 @@
+rules_version = '2';
+
+// Reglas de seguridad de Firestore para los formularios de Casas TDA.
+// Se pegan en: consola de Firebase → Firestore → pestaña "Reglas" → Publicar.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Administradores: pueden ver la lista, crear, editar y borrar.
+    // Debe coincidir con ADMINS en app-nube.js.
+    function esAdmin() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in ['eldiego87@gmail.com'];
+    }
+
+    match /formularios/{id} {
+      // La lista completa: solo administradores.
+      allow list: if esAdmin();
+
+      // Un formulario puntual: cualquiera que tenga el link (el id es
+      // aleatorio de 20 caracteres, no se puede adivinar).
+      allow get: if true;
+
+      allow create, delete: if esAdmin();
+
+      // El cliente (sin cuenta) solo puede agregar SU firma, una sola vez,
+      // y no puede cambiar ningún otro dato.
+      function firmaDelCliente() {
+        return resource.data.estado == 'pendiente'
+          && request.resource.data.estado == 'firmado'
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['firmasCliente', 'estado', 'firmadoEn'])
+          && request.resource.data.firmasCliente is string
+          && request.resource.data.firmasCliente.size() > 0
+          && request.resource.data.firmasCliente.size() < 400000
+          && request.resource.data.firmadoEn == request.time;
+      }
+
+      allow update: if esAdmin() || firmaDelCliente();
+    }
+
+    // Todo lo demás, cerrado.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

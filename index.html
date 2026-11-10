@@ -419,6 +419,59 @@ canvas.pad{
 
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
 
+ /* ---------- v3: nube ---------- */
+[hidden]{display:none !important;}
+img.pad--guardada{
+  width:100%;height:218px;object-fit:contain;display:block;
+  border:1px solid var(--ok);border-radius:var(--radius-field);
+  background:var(--surface-2);
+}
+.nube-bar{
+  max-width:760px;margin:12px auto 0;padding:0 14px;
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+}
+.nube-bar__estado{font-size:12px;color:var(--ink-muted);margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.nube-bar__estado b{color:var(--ink);}
+.nube-lista{list-style:none;margin:0;padding:0;}
+.nube-item{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:10px 0;border-bottom:1px solid var(--line-soft);
+}
+.nube-item:last-child{border-bottom:none;}
+.nube-item__info{flex:1;min-width:180px;}
+.nube-item__titulo{font-weight:600;font-size:13.5px;}
+.nube-item__sub{font-size:11.5px;color:var(--ink-faint);font-variant-numeric:tabular-nums;}
+.nube-item__acciones{display:flex;gap:6px;flex-wrap:wrap;}
+.nube-item.is-actual{background:var(--accent-soft);margin:0 -10px;padding:10px;border-radius:var(--radius-field);}
+.badge{
+  display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
+  padding:2px 7px;border-radius:999px;margin-left:6px;vertical-align:1px;
+}
+.badge--pendiente{background:var(--warn-soft);color:var(--warn);}
+.badge--firmado{background:var(--ok-soft);color:var(--ok);}
+.nube-vacio{font-size:13px;color:var(--ink-faint);padding:6px 0;}
+.aviso{
+  max-width:760px;margin:12px auto 0;padding:12px 14px;
+  background:var(--accent-soft);color:var(--ink);
+  border-radius:var(--radius-panel);font-size:13.5px;
+}
+.aviso b{display:block;margin-bottom:2px;}
+.toast{
+  position:fixed;left:50%;bottom:70px;transform:translateX(-50%);z-index:50;
+  background:var(--ink);color:var(--paper);
+  padding:9px 14px;border-radius:var(--radius-field);
+  font-size:13px;max-width:calc(100% - 32px);text-align:center;
+  box-shadow:var(--shadow);
+}
+.btn[disabled]{opacity:.5;cursor:default;}
+/* Vista para el cliente que firma por link */
+body.modo-firma .nube-bar,
+body.modo-firma #panelLista,
+body.modo-firma #btnEditarDatos,
+body.modo-firma #btnGuardar,
+body.modo-firma #btnExportar,
+body.modo-firma #btnSolicitarFirma{display:none !important;}
+
 @media (max-width:480px){
   .topbar__logo{height:24px;}
   .topbar__title{font-size:11px;}
@@ -452,6 +505,28 @@ canvas.pad{
     <div class="progress__track"><div class="progress__fill" id="progressFill"></div></div>
     <div class="progress__label" id="progressLabel">0/0 campos</div>
   </div>
+</div>
+
+<!-- v3: sesión y formularios guardados -->
+<div class="nube-bar">
+  <span class="nube-bar__estado" id="nubeEstado">Conectando…</span>
+  <button type="button" class="btn btn--ghost" id="btnLista" hidden>Guardados</button>
+  <button type="button" class="btn btn--ghost" id="btnNuevo" hidden>Nuevo</button>
+  <button type="button" class="btn btn--primary" id="btnLogin" hidden>Iniciar sesión</button>
+  <button type="button" class="ghost-btn" id="btnLogout" hidden>Salir</button>
+</div>
+<div class="aviso" id="avisoFirma" hidden></div>
+<div class="wrap" id="panelLista" hidden style="margin-top:12px;">
+  <section class="panel">
+    <header class="panel__band">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+      <h2>Formularios guardados</h2>
+      <button type="button" class="ghost-btn" id="btnCerrarLista" style="margin-left:auto">Cerrar</button>
+    </header>
+    <div class="panel__body">
+      <ul class="nube-lista" id="nubeLista"></ul>
+    </div>
+  </section>
 </div>
 
 <div class="wrap" id="entryPanels">
@@ -924,9 +999,13 @@ canvas.pad{
       <span id="barCampos">0/0 campos</span>
     </div>
     <button type="button" class="btn btn--ghost" id="btnGuardar">Guardar</button>
+    <button type="button" class="btn btn--ghost" id="btnSolicitarFirma" hidden>Solicitar firma</button>
     <button type="button" class="btn btn--primary" id="btnExportar">Exportar PDF</button>
+    <button type="button" class="btn btn--primary" id="btnGuardarFirma" hidden>Guardar firma</button>
+    <button type="button" class="btn btn--primary" id="btnDescargar" hidden>Descargar registro</button>
   </div>
 </div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
     <script>
         const { jsPDF } = window.jspdf;
@@ -1133,12 +1212,10 @@ canvas.pad{
 
 
         
-        async function agregarFirmaSVG(doc, pad, x, y, width, height) {
-            if (pad.isEmpty()) return;
-            // En signature_pad v4 no existe toSVG() público; toDataURL('image/svg+xml')
-            // devuelve el data URL en base64 con el SVG adentro.
-            const svgDataUrl = pad.toDataURL('image/svg+xml');
-            const svgString = atob(svgDataUrl.split(',')[1]);
+        async function agregarFirmaSVG(doc, clave, x, y, width, height) {
+            // v3: si el pad está vacío se usa la firma guardada en la nube (si hay)
+            const svgString = svgDeClave(clave);
+            if (!svgString) return;
             const svgElement = new DOMParser().parseFromString(svgString, 'image/svg+xml').documentElement;
 
             // signature_pad arma el viewBox con el tamaño crudo del buffer (multiplicado
@@ -1614,10 +1691,10 @@ if (rechazo !== '') {
     doc.text(comentariosLíneas, 11, 178);  // Coordenadas X=10, Y=200
 
             // Obtener la firma y el apellido como vectores (SVG) y añadirlos al PDF
-            await agregarFirmaSVG(doc, signaturePad, 120, 260, 77, 27);
-            await agregarFirmaSVG(doc, apellidoPad, 120, 282, 70, 12);
-            await agregarFirmaSVG(doc, signaturePadTecnico, 10, 260, 77, 27);
-            await agregarFirmaSVG(doc, apellidoPadTecnico, 10, 282, 70, 12);
+            await agregarFirmaSVG(doc, 'firmaCliente', 120, 260, 77, 27);
+            await agregarFirmaSVG(doc, 'apellidoCliente', 120, 282, 70, 12);
+            await agregarFirmaSVG(doc, 'firmaTecnico', 10, 260, 77, 27);
+            await agregarFirmaSVG(doc, 'apellidoTecnico', 10, 282, 70, 12);
 
             // Generar el nombre del archivo PDF
             const formattedDateForFilename = fecha.replace(/-/g, '').slice(2); // Formato AAMMDD
@@ -1643,6 +1720,104 @@ if (rechazo !== '') {
         function limpiarApellidoTecnico() {
             apellidoPadTecnico.clear();
         }
+
+        // ===== v3: firmas que se pueden guardar en la nube =====
+        // Se guardan los trazos (puntos), no una imagen: ocupan poco y el PDF
+        // sigue saliendo en vector igual que antes.
+        const padsPorClave = {
+            firmaTecnico:    { pad: signaturePadTecnico, canvas: canvasTecnico,         dot: 'dotFirmaTecnico',    txt: 'txtFirmaTecnico',    clear: 'clearFirmaTecnico' },
+            apellidoTecnico: { pad: apellidoPadTecnico,  canvas: apellidoCanvasTecnico, dot: 'dotApellidoTecnico', txt: 'txtApellidoTecnico', clear: 'clearApellidoTecnico' },
+            firmaCliente:    { pad: signaturePad,        canvas: canvas,                dot: 'dotFirma',           txt: 'txtFirma',           clear: 'clearFirma', bar: 'barFirma' },
+            apellidoCliente: { pad: apellidoPad,         canvas: apellidoCanvas,        dot: 'dotApellido',        txt: 'txtApellido',        clear: 'clearApellido' }
+        };
+        // Firmas cargadas desde la nube (clave -> {w, h, g}); se usan si el pad está vacío
+        const firmasGuardadas = {};
+
+        // Trazos del pad -> objeto compacto {w, h, g:[{o: opciones, p: [[x, y, t, presión]]}]}
+        function firmaDesdePad(clave) {
+            const { pad, canvas: c } = padsPorClave[clave];
+            if (pad.isEmpty()) return null;
+            const r = n => Math.round(n * 10) / 10;
+            const ratio = Math.max(window.devicePixelRatio || 1, 1);
+            const grupos = pad.toData();
+            let maxX = 0, maxY = 0;
+            const g = grupos.map(grupo => {
+                const { points, ...opciones } = grupo;
+                const t0 = points.length ? points[0].time : 0;
+                return { o: opciones, p: points.map(pt => {
+                    maxX = Math.max(maxX, pt.x); maxY = Math.max(maxY, pt.y);
+                    return [r(pt.x), r(pt.y), Math.round((pt.time || 0) - t0), r(pt.pressure || 0.5)];
+                }) };
+            });
+            // Tamaño del recuadro: el visible, o el del buffer si está oculto
+            const w = c.offsetWidth || Math.round(c.width / ratio) || Math.max(300, Math.ceil(maxX) + 10);
+            const h = c.offsetHeight || Math.round(c.height / ratio) || Math.max(218, Math.ceil(maxY) + 10);
+            return { w, h, g };
+        }
+
+        // La firma vigente de una clave: lo dibujado ahora, o lo guardado
+        function obtenerFirma(clave) {
+            return firmaDesdePad(clave) || firmasGuardadas[clave] || null;
+        }
+
+        // Objeto compacto -> SVG (string), dibujándolo en un canvas fuera de pantalla
+        function svgDeFirma(f) {
+            if (!f || !f.g || !f.g.length) return null;
+            const ratio = Math.max(window.devicePixelRatio || 1, 1);
+            const c = document.createElement('canvas');
+            c.width = f.w * ratio;
+            c.height = f.h * ratio;
+            c.getContext('2d').scale(ratio, ratio);
+            const pad = new SignaturePad(c);
+            pad.fromData(f.g.map(gr => ({ ...gr.o, points: gr.p.map(([x, y, t, pr]) => ({ x, y, time: t, pressure: pr })) })));
+            const svg = atob(pad.toDataURL('image/svg+xml').split(',')[1]);
+            pad.off();
+            return svg;
+        }
+
+        // SVG de una clave: del pad si tiene trazos, si no de la firma guardada
+        function svgDeClave(clave) {
+            const { pad } = padsPorClave[clave];
+            if (!pad.isEmpty()) return atob(pad.toDataURL('image/svg+xml').split(',')[1]);
+            return svgDeFirma(firmasGuardadas[clave]);
+        }
+
+        // Muestra (o quita) la vista previa de una firma guardada en lugar del pad
+        function mostrarFirmaGuardada(clave) {
+            const info = padsPorClave[clave];
+            let img = info.canvas.parentNode.querySelector('img.pad--guardada');
+            if (!img) {
+                img = document.createElement('img');
+                img.className = 'pad pad--guardada';
+                img.alt = 'Firma guardada';
+                info.canvas.insertAdjacentElement('afterend', img);
+            }
+            const f = firmasGuardadas[clave];
+            const hayGuardada = !!f && info.pad.isEmpty();
+            if (hayGuardada) {
+                let svg = svgDeFirma(f);
+                // mismo ajuste de viewBox que se usa para el PDF
+                svg = svg.replace(/viewBox="[^"]*"/, `viewBox="0 0 ${f.w} ${f.h}"`);
+                img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+            }
+            img.hidden = !hayGuardada;
+            info.canvas.hidden = hayGuardada;
+            document.getElementById(info.dot).classList.toggle('is-ok', hayGuardada || !info.pad.isEmpty());
+            if (hayGuardada) {
+                document.getElementById(info.txt).textContent = 'guardada';
+                if (info.bar) document.getElementById(info.bar).textContent = 'Firma: guardada';
+            }
+        }
+
+        // "Limpiar" también descarta la firma guardada y vuelve a mostrar el pad
+        Object.keys(padsPorClave).forEach(clave => {
+            document.getElementById(padsPorClave[clave].clear).addEventListener('click', () => {
+                if (!firmasGuardadas[clave]) return;
+                delete firmasGuardadas[clave];
+                mostrarFirmaGuardada(clave);
+                window.dispatchEvent(new Event('resize'));  // el canvas vuelve a verse: reajustar tamaño
+            });
+        });
     </script>
 
     <script>
@@ -1881,7 +2056,11 @@ if (rechazo !== '') {
       document.getElementById('btnGuardar').addEventListener('click', mostrarResumen);
       document.getElementById('btnEditarDatos').addEventListener('click', volverAEditar);
       document.getElementById('btnExportar').addEventListener('click', exportarPDF);
+
+      // v3: el módulo de la nube necesita poder cambiar de vista
+      window.formUI = { mostrarResumen: mostrarResumen, volverAEditar: volverAEditar };
     })();
     </script>
+    <script type="module" src="app-nube.js"></script>
 </body>
 </html>
