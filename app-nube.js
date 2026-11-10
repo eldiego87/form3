@@ -11,12 +11,11 @@ import {
 } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js';
 import {
   getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
-  query, orderBy, serverTimestamp
+  query, orderBy, serverTimestamp, Timestamp, writeBatch
 } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js';
 import { firebaseConfig } from './firebase-config.js';
+import { ADMINS, SEDES_SELECTS, normalizar, claveSede, sedeDelFormulario, registroDelFormulario } from './comun.js';
 
-// Debe coincidir con la lista de firestore.rules
-const ADMINS = ['eldiego87@gmail.com'];
 const MAX_FORMULARIOS = 20;
 // Límite de Firestore: 1 MiB por documento. Se deja margen.
 const MAX_BYTES_FIRMAS = 700000;
@@ -24,7 +23,9 @@ const MAX_BYTES_FIRMAS = 700000;
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const coleccion = collection(db, 'formularios');
+const coleccion = collection(db, 'formularios');   // los 20 más recientes, con firmas
+const registros = collection(db, 'registros');      // historial permanente, solo datos
+const sedes = collection(db, 'sedes');              // empresa + sede (para el panel)
 
 const $ = id => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -33,7 +34,7 @@ let idActual = params.get('id');            // formulario abierto por el admin
 let usuario = null;
 let estadoActual = null;                    // 'pendiente' | 'firmado' | null
 
-const SEDES = ['nefroargINPUT', 'itacINPUT', 'sancaINPUT', 'militarINPUT'];
+const SEDES = SEDES_SELECTS;
 
 // ---------------------------------------------------------------------
 // Utilidades de interfaz
@@ -185,9 +186,15 @@ async function guardar() {
       history.replaceState(null, '', `?id=${idActual}`);
       await recortarAlMaximo();
     }
+    let enHistorial;
+    try { enHistorial = await registrarEnHistorial(campos); }
+    catch (e) { console.error('Historial', e); enHistorial = 'error'; }
     estadoActual = datos.estado;
     actualizarBotones();
-    toast(datos.estado === 'firmado' ? 'Guardado (firmado) ✓' : 'Guardado ✓ — falta la firma del cliente');
+    const avisoHistorial = enHistorial === 'error' ? ' · ⚠ No se pudo registrar en el historial (volvé a guardar)'
+      : enHistorial ? '' : ' · No va al historial: falta la empresa';
+    toast((datos.estado === 'firmado' ? 'Guardado (firmado) ✓' : 'Guardado ✓ — falta la firma del cliente') + avisoHistorial,
+      avisoHistorial ? 6000 : 3500);
     if (!$('panelLista').hidden) await mostrarLista();
   } catch (e) {
     console.error(e);
@@ -198,6 +205,61 @@ async function guardar() {
       toast('No se pudo guardar: ' + (e.message || e), 6000);
     }
   }
+}
+
+// ---------------------------------------------------------------------
+// Historial para gráficos: un registro por formulario (mismo id)
+// ---------------------------------------------------------------------
+function empresasConSedes() {
+  return new Set([...document.querySelectorAll('select[data-empresa]')].map(s => s.dataset.empresa));
+}
+
+async function registrarEnHistorial(campos) {
+  const sede = sedeDelFormulario(campos, empresasConSedes());
+  if (!sede.empresa) return false;
+  const reg = registroDelFormulario(campos);
+  const cuando = new Date(`${reg.fecha || '1970-01-01'}T${reg.hora || '00:00'}`);
+  const lote = writeBatch(db);
+  lote.set(doc(registros, idActual), {
+    ...reg,
+    ...sede,
+    ts: Timestamp.fromDate(isNaN(cuando) ? new Date() : cuando),
+    actualizado: serverTimestamp(),
+    autor: usuario.email
+  });
+  const datosSede = { empresa: sede.empresa, sede: sede.sede, empresaKey: sede.empresaKey, ultimoRegistro: serverTimestamp() };
+  if (sede.frecuente) datosSede.frecuente = true;   // un ingreso manual nunca "degrada" una sede frecuente
+  lote.set(doc(sedes, sede.sedeKey), datosSede, { merge: true });
+  await lote.commit();
+  return true;
+}
+
+// Las combinaciones empresa + sede de los desplegables se copian a la base,
+// así una empresa o sede nueva agregada al HTML aparece sola en el panel.
+async function sincronizarCatalogo() {
+  const catalogo = [];
+  [...$('empresaINPUT').options].filter(o => o.value).forEach(o => {
+    const select = document.querySelector(`select[data-empresa="${CSS.escape(o.value)}"]`);
+    const opciones = select ? [...select.options].filter(x => x.value).map(x => x.value) : [];
+    if (opciones.length) opciones.forEach(sede => catalogo.push({ empresa: o.value, sede }));
+    else catalogo.push({ empresa: o.value, sede: '' });
+  });
+  const huella = JSON.stringify(catalogo);
+  try { if (localStorage.getItem('catalogoSedes') === huella) return; } catch (e) {}
+
+  const claves = new Set(catalogo.map(c => claveSede(c.empresa, c.sede)));
+  const existentes = await getDocs(sedes);
+  const lote = writeBatch(db);
+  catalogo.forEach(c => {
+    lote.set(doc(sedes, claveSede(c.empresa, c.sede)),
+      { empresa: c.empresa, sede: c.sede, empresaKey: normalizar(c.empresa), frecuente: true }, { merge: true });
+  });
+  // Las que se quitaron de los desplegables pasan a "eventuales" (no se borra su historial)
+  existentes.docs.forEach(d => {
+    if (d.data().frecuente && !claves.has(d.id)) lote.update(d.ref, { frecuente: false });
+  });
+  await lote.commit();
+  try { localStorage.setItem('catalogoSedes', huella); } catch (e) {}
 }
 
 // Mantiene como máximo 20 formularios: borra los más viejos
@@ -256,9 +318,14 @@ $('nubeLista').addEventListener('click', async ev => {
     solicitarFirma(id, titulo, item.querySelector('.nube-item__sub').textContent.trim());
   } else if (boton.dataset.accion === 'borrar') {
     if (!confirm(`¿Borrar definitivamente "${titulo}"?`)) return;
-    await conBoton(boton, '…', () => deleteDoc(doc(coleccion, id)));
+    const tambienHistorial = confirm('¿Borrarlo también del historial de gráficos?\n\n' +
+      'Aceptar = sí, borrar también (por ejemplo, si era una prueba)\nCancelar = conservar sus datos en el historial');
+    await conBoton(boton, '…', async () => {
+      await deleteDoc(doc(coleccion, id));
+      if (tambienHistorial) await deleteDoc(doc(registros, id));
+    });
     if (id === idActual) { idActual = null; history.replaceState(null, '', location.pathname); actualizarBotones(); }
-    toast('Formulario borrado');
+    toast(tambienHistorial ? 'Formulario borrado (también del historial)' : 'Formulario borrado (el historial se conserva)');
     await mostrarLista();
   }
 });
@@ -388,6 +455,7 @@ function actualizarBotones() {
   $('btnLogout').hidden = !usuario;
   $('btnLista').hidden = !admin;
   $('btnNuevo').hidden = !admin;
+  $('btnPanel').hidden = !admin;
   $('btnSolicitarFirma').hidden = !(admin && idActual && estadoActual === 'pendiente');
   if (!usuario) {
     $('nubeEstado').innerHTML = 'Sin sesión · <span>los datos no se guardan en la nube</span>';
@@ -431,6 +499,7 @@ if (idParaFirmar) {
   onAuthStateChanged(auth, async u => {
     usuario = u;
     actualizarBotones();
+    if (esAdmin()) sincronizarCatalogo().catch(e => console.warn('Catálogo de sedes', e));
     if (primeraVez && idActual) {
       primeraVez = false;
       if (esAdmin()) await abrir(idActual);

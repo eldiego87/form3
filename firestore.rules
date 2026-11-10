@@ -39,6 +39,18 @@ service cloud.firestore {
       allow update: if esAdmin() || firmaDelCliente();
     }
 
+    // Historial permanente de mediciones (para los gráficos del panel).
+    // Cada registro guarda empresaKey: más adelante se puede dar acceso de
+    // lectura a un cliente solo para los registros de su empresa.
+    match /registros/{id} {
+      allow read, write: if esAdmin();
+    }
+
+    // Empresas + sedes que aparecen en el panel.
+    match /sedes/{id} {
+      allow read, write: if esAdmin();
+    }
+
     // Todo lo demás, cerrado.
     match /{document=**} {
       allow read, write: if false;
