@@ -252,7 +252,7 @@ function bandasDe(medida) {
 }
 
 const DEF = {
-  rechazo: { titulo: 'Rechazo', unidad: '%', series: [['rechazo', 'Calculado'], ['rechazoEquipo', 'Indicado por el equipo']], bandas: 'rechazo', dec: 1 },
+  rechazo: { titulo: 'Rechazo', unidad: '%', series: [['rechazo', 'Rechazo']], bandas: 'rechazo', dec: 1 },
   condOUT: { titulo: 'Conductividad de salida', unidadDe: 'condOUT', series: [['condOUT', 'Salida']], bandas: 'condOUT', dec: 1, min0: true },
   condIN: { titulo: 'Conductividad de entrada', unidadDe: 'condIN', series: [['condIN', 'Entrada']], dec: 0, min0: true },
   caudales: { titulo: 'Caudales', unidad: 'L/h', series: [['caudalPERM', 'Permeado'], ['caudalCONC', 'Concentrado']], dec: 0, min0: true },
@@ -278,25 +278,35 @@ function renderGraficos(regs) {
       if (usadas.length > 1) nota = 'Atención: en este período hay mediciones en µS/cm y en ppm. Revisá la unidad de cada punto en la tabla.';
     }
 
+    let hayFaltantes = false;
     const datasets = d.series.map(([campo, nombre], i) => {
       const color = css(`--series-${i + 1}`);
       return {
         label: nombre,
-        data: regs.filter(r => r.v?.[campo] != null).map(r => ({ x: r.ms, y: r.v[campo] })),
+        data: conFaltantes(regs, campo),
         borderColor: color, backgroundColor: color,
         borderWidth: 2, tension: 0, spanGaps: true,
-        pointRadius: 4, pointHoverRadius: 6, pointBorderColor: sup, pointBorderWidth: 2, pointHitRadius: 12,
+        // Dato medido: punto lleno y grande. Visita sin dato: círculo vacío sobre la línea.
+        pointRadius: c => c.raw?.faltante ? 4 : 5.5,
+        pointHoverRadius: c => c.raw?.faltante ? 5.5 : 7.5,
+        pointBackgroundColor: c => c.raw?.faltante ? sup : color,
+        pointBorderColor: c => c.raw?.faltante ? color : sup,
+        pointHoverBackgroundColor: c => c.raw?.faltante ? sup : color,
+        pointHoverBorderColor: c => c.raw?.faltante ? color : sup,
+        pointBorderWidth: 2, pointHoverBorderWidth: 2, pointHitRadius: 12,
         borderJoinStyle: 'round', borderCapStyle: 'round'
       };
-    }).filter(ds => ds.data.length);
+    }).filter(ds => ds.data.some(p => !p.faltante));
+    hayFaltantes = datasets.some(ds => ds.data.some(p => p.faltante));
+    if (hayFaltantes) nota = ['○ círculo vacío = visita sin ese dato.', nota].filter(Boolean).join(' ');
 
-    const total = datasets.reduce((n, ds) => n + ds.data.length, 0);
+    const total = datasets.reduce((n, ds) => n + ds.data.filter(p => !p.faltante).length, 0);
     card.innerHTML = `<h2>${esc(d.titulo)} <span class="sub" style="font-weight:400">(${esc(unidad)})</span></h2>` +
       (total ? `<div class="lienzo"><canvas aria-label="${esc(d.titulo)}" role="img"></canvas></div>` : '<div class="vacio">Sin datos en este período</div>') +
       (nota ? `<div class="nota">${esc(nota)}</div>` : '');
     if (!total) return;
 
-    const valores = datasets.flatMap(ds => ds.data.map(p => p.y));
+    const valores = datasets.flatMap(ds => ds.data.filter(p => !p.faltante).map(p => p.y));
     const yOpts = { grid: { color: grilla }, border: { color: eje }, ticks: { color: tenue, font: { size: 11 } } };
     if (clave === 'rechazo') { yOpts.suggestedMin = Math.min(85, ...valores); yOpts.suggestedMax = 100; yOpts.max = Math.max(100, ...valores); }
     else if (d.min0) yOpts.beginAtZero = true;
@@ -337,6 +347,7 @@ function renderGraficos(regs) {
             callbacks: {
               title: items => fmtFecha(items[0].parsed.x),
               label: item => {
+                if (item.raw?.faltante) return ` ${item.dataset.label}: sin dato`;
                 const val = item.parsed.y;
                 let txt = ` ${item.dataset.label}: ${fmtNum(val, d.dec)} ${unidad}`;
                 if (d.bandas) {
@@ -402,10 +413,30 @@ function renderCambios(regs) {
     : '<tbody><tr><td style="text-align:left;color:var(--ink-faint)">No hay cambios de filtros en este período.</td></tr></tbody>';
 }
 
+// Puntos de una serie. Las visitas sin dato que quedan ENTRE dos mediciones
+// se marcan como "faltante" sobre la línea (posición interpolada) para que
+// se vea que ese día no se midió. Antes de la primera o después de la última
+// medición no hay línea, así que no se marcan.
+function conFaltantes(regs, campo) {
+  const medidos = regs.map((r, i) => r.v?.[campo] != null ? i : -1).filter(i => i >= 0);
+  if (!medidos.length) return [];
+  const desde = medidos[0], hasta = medidos[medidos.length - 1];
+  const puntos = [];
+  for (let i = desde; i <= hasta; i++) {
+    const r = regs[i], valor = r.v?.[campo];
+    if (valor != null) { puntos.push({ x: r.ms, y: valor }); continue; }
+    const ant = regs[medidos.filter(j => j < i).pop()];
+    const sig = regs[medidos.find(j => j > i)];
+    const t = sig.ms === ant.ms ? 0 : (r.ms - ant.ms) / (sig.ms - ant.ms);
+    puntos.push({ x: r.ms, y: ant.v[campo] + (sig.v[campo] - ant.v[campo]) * t, faltante: true });
+  }
+  return puntos;
+}
+
 // Columnas de la tabla y del CSV
 function columnas() {
   return [
-    ['rechazo', 'Rechazo %', 1], ['rechazoEquipo', 'Rechazo equipo %', 1],
+    ['rechazo', 'Rechazo %', 1],
     ['condIN', 'Cond. entrada', 1], ['condOUT', 'Cond. salida', 1],
     ['caudalPERM', 'Permeado L/h', 0], ['caudalCONC', 'Concentrado L/h', 0],
     ...PRESIONES_PRE.map(([id, n]) => [id, `${n} bar`, 1]),

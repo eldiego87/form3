@@ -121,8 +121,6 @@ export function registroDelFormulario(campos) {
   v.rechazo = (mismaUnidad && v.condIN > 0 && v.condOUT != null)
     ? Math.round(((v.condIN - v.condOUT) / v.condIN) * 1000) / 10
     : null;
-  // Rechazo que muestra el equipo (campo "Rechazo registrado")
-  v.rechazoEquipo = numero(campos.rechazo);
 
   // Caudales: todo a litros por hora
   const aLh = (valor, unidad) => valor == null ? null : (unidad === 'L/m' ? valor * 60 : valor);
