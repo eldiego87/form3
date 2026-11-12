@@ -406,7 +406,9 @@ async function iniciarModoFirma() {
     cargarFirmas(f.firmasCliente);
     avisar('Orden firmada ✓', 'Ya registramos tu conformidad. Podés descargar el registro.');
   } else {
-    avisar('Revisá el resumen y firmá la conformidad', 'Al final de la página están los recuadros de firma y aclaración. Después tocá "Guardar firma".');
+    document.body.classList.add('firma-pendiente');
+    avisar('Revisá el resumen y firmá la conformidad', 'Al final de la página están los recuadros de firma y aclaración. ' +
+      'Para firmar más cómodo, girá el celular y usalo en modo paisaje (horizontal). Después tocá "Guardar firma".');
   }
   window.formUI.mostrarResumen();
   refrescarVistasDeFirmas();
@@ -441,6 +443,7 @@ async function guardarFirmaCliente() {
   Object.assign(firmasGuardadas, cliente);
   estadoActual = 'firmado';
   $('btnGuardarFirma').hidden = true;
+  document.body.classList.remove('firma-pendiente');
   $('btnDescargar').hidden = false;
   avisar('¡Gracias! Firma guardada ✓', 'Ya podés descargar el registro en PDF.');
   window.scrollTo({ top: 0, behavior: 'smooth' });
